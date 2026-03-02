@@ -1,0 +1,45 @@
+name: Stash Sync
+description: Transfer scenes between two Stash instances with full metadata preservation
+version: 1.0.0
+
+ui:
+  javascript:
+    - stash_sync_ui.js
+
+settings:
+  remote_url:
+    displayName: Remote Instance URL
+    type: STRING
+  remote_api_key:
+    displayName: Remote API Key
+    type: STRING
+  remote_name:
+    displayName: Remote Instance Name
+    type: STRING
+  destination_path:
+    displayName: Destination Library Path
+    type: STRING
+  transfer_tag:
+    displayName: Transfer Tag Name
+    type: STRING
+
+exec:
+  - python3
+  - stash-sync.py
+
+interface: raw
+errLog: warning
+
+tasks:
+  - name: Transfer Tagged Scenes
+    description: Transfer all scenes tagged for transfer to the remote instance
+    defaultArgs:
+      mode: transfer_tagged
+  - name: Transfer Single Scene
+    description: Transfer a single scene by ID to the remote instance
+    defaultArgs:
+      mode: transfer_single
+  - name: Dry Run
+    description: Preview what scenes would be transferred without making changes
+    defaultArgs:
+      mode: dry_run
