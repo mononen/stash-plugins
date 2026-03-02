@@ -2,7 +2,8 @@
   "use strict";
 
   const PLUGIN_ID = "stash-sync";
-  const BTN_ID = "stash-sync-transfer-btn";
+  const MENU_ITEM_ID = "stash-sync-transfer-menuitem";
+  const TOAST_ID = "stash-sync-toast";
 
   // ---------------------------------------------------------------------------
   // GraphQL helpers
@@ -48,49 +49,85 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Transfer button – injected into the DOM (no React patching)
+  // Toast notification (no React / PluginApi.hooks.useToast)
+  // ---------------------------------------------------------------------------
+
+  function showNotification(message, isError = false) {
+    let toast = document.getElementById(TOAST_ID);
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = TOAST_ID;
+      toast.className = "stash-sync-toast";
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.toggle("stash-sync-toast-error", isError);
+    toast.classList.add("stash-sync-toast-visible");
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => {
+      toast.classList.remove("stash-sync-toast-visible");
+    }, 4000);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transfer menu item – add under the scene page 3-dot menu
   // ---------------------------------------------------------------------------
 
   function getSceneIdFromPath() {
-    const m = window.location.pathname.match(/\/scenes\/(\d+)/);
+    const m = window.location.pathname.match(/\/scene[s]?\/(\d+)/);
     return m ? m[1] : null;
   }
 
-  function removeTransferButton() {
-    const existing = document.getElementById(BTN_ID);
+  function removeTransferMenuItem() {
+    const existing = document.getElementById(MENU_ITEM_ID);
     if (existing) existing.remove();
   }
 
-  async function injectTransferButton() {
+  function findThreeDotDropdownMenu() {
+    const container =
+      document.querySelector("#scene-page-container") ||
+      document.querySelector(".scene-toolbar") ||
+      document.querySelector(".scene-header");
+    if (!container) return null;
+    const dropdowns = container.querySelectorAll(".dropdown-menu");
+    for (const menu of dropdowns) {
+      const trigger = menu.previousElementSibling || menu.parentElement?.querySelector(".dropdown-toggle");
+      if (!trigger) continue;
+      const icon = trigger.querySelector("svg, .fa-ellipsis-v, .fa-ellipsis");
+      if (icon || trigger.getAttribute("aria-label")?.toLowerCase().includes("menu")) {
+        return menu;
+      }
+    }
+    return dropdowns[dropdowns.length - 1] || null;
+  }
+
+  async function injectTransferMenuItem() {
     const sceneId = getSceneIdFromPath();
     if (!sceneId) {
-      removeTransferButton();
+      removeTransferMenuItem();
       return;
     }
 
-    // Already injected for this scene
-    const existing = document.getElementById(BTN_ID);
+    const existing = document.getElementById(MENU_ITEM_ID);
     if (existing && existing.dataset.sceneId === sceneId) return;
-    removeTransferButton();
+    removeTransferMenuItem();
 
-    // Find the scene page toolbar / header to attach to
-    const toolbar =
-      document.querySelector(".scene-toolbar") ||
-      document.querySelector(".scene-header") ||
-      document.querySelector("#scene-page-container .scene-info") ||
-      document.querySelector("#scene-page-container");
-
-    if (!toolbar) return;
+    const menu = findThreeDotDropdownMenu();
+    if (!menu) return;
 
     const remoteName = await getRemoteName();
 
-    const btn = document.createElement("button");
-    btn.id = BTN_ID;
-    btn.dataset.sceneId = sceneId;
-    btn.className = "btn btn-primary stash-sync-btn";
-    btn.textContent = "Transfer to " + remoteName;
+    const li = document.createElement("li");
+    li.id = MENU_ITEM_ID;
+    li.dataset.sceneId = sceneId;
+    const a = document.createElement("a");
+    a.className = "dropdown-item stash-sync-menuitem";
+    a.href = "#";
+    a.textContent = "Transfer to " + remoteName;
 
-    btn.addEventListener("click", async () => {
+    a.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       if (
         !window.confirm(
           "Transfer this scene to " +
@@ -100,30 +137,22 @@
       )
         return;
 
-      btn.disabled = true;
-      btn.textContent = "Starting transfer\u2026";
-
       try {
         await runTransferTask(sceneId);
-        btn.className = "btn btn-success stash-sync-btn";
-        btn.textContent = "Transfer started \u2014 check Tasks for progress";
+        showNotification("Transfer started — check Tasks for progress");
       } catch (err) {
-        btn.disabled = false;
-        btn.textContent = "Transfer to " + remoteName;
-        window.alert("Transfer failed to start: " + err.message);
+        showNotification("Transfer failed to start: " + err.message, true);
       }
     });
 
-    toolbar.appendChild(btn);
+    li.appendChild(a);
+    menu.appendChild(li);
   }
 
-  // Re-inject on navigation
   PluginApi.Event.addEventListener("stash:location", () => {
-    setTimeout(injectTransferButton, 300);
+    setTimeout(injectTransferMenuItem, 300);
   });
-
-  // Also try on initial load
-  setTimeout(injectTransferButton, 500);
+  setTimeout(injectTransferMenuItem, 500);
 
   // ---------------------------------------------------------------------------
   // Mask the API key field in plugin settings (DOM-only, settings page)
@@ -179,8 +208,28 @@
 
   const style = document.createElement("style");
   style.textContent = `
-    .stash-sync-btn {
-      margin: 0.5rem;
+    .stash-sync-toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: 0.75rem 1.25rem;
+      background: var(--bs-success, #198754);
+      color: #fff;
+      border-radius: 0.25rem;
+      box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.2);
+      z-index: 9999;
+      opacity: 0;
+      transform: translateY(0.5rem);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      max-width: 20rem;
+    }
+    .stash-sync-toast.stash-sync-toast-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .stash-sync-toast.stash-sync-toast-error {
+      background: var(--bs-danger, #dc3545);
     }
     .ss-blurred-value {
       filter: blur(5px);
