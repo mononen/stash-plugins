@@ -83,6 +83,22 @@ query FindSceneByHash($input: SceneHashInput!) {
 }
 """
 
+FIND_SCENES_BY_PATH = """
+query FindScenesByPath($filter: FindFilterType, $scene_filter: SceneFilterType) {
+    findScenes(filter: $filter, scene_filter: $scene_filter) {
+        scenes { id files { path } }
+    }
+}
+"""
+
+REMOTE_LIBRARY_PATHS = """
+query {
+    configuration {
+        general { stashes { path } }
+    }
+}
+"""
+
 TRIGGER_SCAN = """
 mutation MetadataScan($input: ScanMetadataInput!) {
     metadataScan(input: $input)
@@ -470,17 +486,40 @@ def transfer_scene(scene_id, source, remote, resolver, dest_path, tag_name):
         })
         wait_for_job(remote, scan_result.get("metadataScan"))
 
-        # 6. Find the new scene by oshash
+        # 6. Find the new scene on the destination by file path (primary)
+        #    or by oshash (fallback)
         new_scene_id = None
         for attempt in range(SCENE_FIND_MAX_ATTEMPTS):
             wait = min(2 ** attempt, 15)
             time.sleep(wait)
-            result = gql(remote, FIND_SCENE_BY_HASH, {
-                "input": {"oshash": oshash}
+
+            # Try path-based lookup first — most reliable since we know
+            # exactly where we put the file
+            result = gql(remote, FIND_SCENES_BY_PATH, {
+                "filter": {"per_page": 5},
+                "scene_filter": {
+                    "path": {"value": dest_file, "modifier": "EQUALS"}
+                },
             })
-            found = result.get("findSceneByHash")
-            if found:
-                new_scene_id = found["id"]
+            scenes_found = (result.get("findScenes") or {}).get("scenes") or []
+            for s in scenes_found:
+                for f in s.get("files") or []:
+                    if f.get("path") == dest_file:
+                        new_scene_id = s["id"]
+                        break
+                if new_scene_id:
+                    break
+
+            # Fallback to hash if path didn't match
+            if not new_scene_id:
+                result = gql(remote, FIND_SCENE_BY_HASH, {
+                    "input": {"oshash": oshash}
+                })
+                found = result.get("findSceneByHash")
+                if found:
+                    new_scene_id = found["id"]
+
+            if new_scene_id:
                 break
             log.debug(f"Scene not yet visible on destination (attempt {attempt + 1})")
 
@@ -548,12 +587,19 @@ def transfer_scene(scene_id, source, remote, resolver, dest_path, tag_name):
         raise
 
     # 9. Cleanup source — file is already moved so just remove the DB entry
-    gql(source, SCENE_DESTROY, {"input": {
-        "id": str(scene_id),
-        "delete_file": False,
-        "delete_generated": True,
-        "destroy_file_entry": True,
-    }})
+    log.info(f"Deleting source scene {scene_id}...")
+    try:
+        gql(source, SCENE_DESTROY, {"input": {
+            "id": str(scene_id),
+            "delete_file": False,
+            "delete_generated": True,
+        }})
+        log.info(f"Source scene {scene_id} deleted")
+    except Exception as exc:
+        log.error(
+            f"Failed to delete source scene {scene_id}: {exc}. "
+            "You may need to remove it manually."
+        )
 
     log.info(f"Done: {title} ({filename})")
 
@@ -621,7 +667,7 @@ def test_connection(source, remote, remote_name, remote_url, dest_path, tag_name
     errors = []
 
     # 1. Remote API
-    log.info(f"[1/4] Remote instance ({remote_name} @ {remote_url})")
+    log.info(f"[1/5] Remote instance ({remote_name} @ {remote_url})")
     try:
         ver = gql(remote, "query { version { version } }")
         v = ver.get("version", {}).get("version", "unknown")
@@ -630,13 +676,13 @@ def test_connection(source, remote, remote_name, remote_url, dest_path, tag_name
         errors.append(f"Remote unreachable: {exc}")
         log.error(f"       FAIL — {exc}")
 
-    # 2. Destination path writable
-    log.info(f"[2/4] Destination path: {dest_path}")
+    # 2. Destination path writable (local filesystem)
+    log.info(f"[2/5] Destination path writable: {dest_path}")
     if os.path.isdir(dest_path):
         test_file = os.path.join(dest_path, ".stash-sync-write-test")
         try:
-            with open(test_file, "w") as f:
-                f.write("ok")
+            with open(test_file, "w") as fh:
+                fh.write("ok")
             os.remove(test_file)
             log.info("       OK — directory exists and is writable")
         except OSError as exc:
@@ -650,8 +696,36 @@ def test_connection(source, remote, remote_name, remote_url, dest_path, tag_name
             errors.append(f"Cannot create destination: {exc}")
             log.error(f"       FAIL — cannot create: {exc}")
 
-    # 3. Transfer tag
-    log.info(f"[3/4] Transfer tag: {tag_name}")
+    # 3. Destination path is inside a remote library path
+    log.info(f"[3/5] Destination in remote library: {dest_path}")
+    try:
+        rcfg = gql(remote, REMOTE_LIBRARY_PATHS)
+        stashes = (
+            rcfg.get("configuration", {})
+            .get("general", {})
+            .get("stashes", [])
+        )
+        lib_paths = [s["path"] for s in stashes]
+        matched = any(
+            dest_path == lp or dest_path.startswith(lp.rstrip("/") + "/")
+            for lp in lib_paths
+        )
+        if matched:
+            log.info(f"       OK — inside remote library")
+        else:
+            errors.append(
+                f"Destination '{dest_path}' is not inside any remote library path. "
+                f"Remote libraries: {lib_paths}"
+            )
+            log.error(
+                f"       FAIL — not inside remote library paths: {lib_paths}"
+            )
+    except Exception as exc:
+        errors.append(f"Could not query remote library paths: {exc}")
+        log.error(f"       FAIL — {exc}")
+
+    # 4. Transfer tag
+    log.info(f"[4/5] Transfer tag: {tag_name}")
     try:
         tag_id = ensure_tag(source, tag_name)
         log.info(f"       OK — tag ID {tag_id}")
@@ -659,8 +733,8 @@ def test_connection(source, remote, remote_name, remote_url, dest_path, tag_name
         errors.append(f"Tag issue: {exc}")
         log.error(f"       FAIL — {exc}")
 
-    # 4. Remote can be scanned (test that the scan mutation is accepted)
-    log.info("[4/4] Remote scan permission")
+    # 5. Remote scan permission
+    log.info("[5/5] Remote scan permission")
     try:
         gql(remote, "query { jobQueue { id } }")
         log.info("       OK — can query remote job queue")
