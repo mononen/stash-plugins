@@ -6,9 +6,12 @@ import time
 import base64
 from urllib.parse import urlparse
 
-import requests
-import stashapi.log as log
-from stashapi.stashapp import StashInterface
+# Support vendored dependencies installed via pip --target lib/
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
+
+import requests  # noqa: E402
+import stashapi.log as log  # noqa: E402
+from stashapi.stashapp import StashInterface  # noqa: E402
 
 DEFAULT_TRANSFER_TAG = "stash-sync: Transfer"
 SCAN_TIMEOUT = 120

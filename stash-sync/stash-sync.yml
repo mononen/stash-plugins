@@ -24,8 +24,8 @@ settings:
     type: STRING
 
 exec:
-  - python3
-  - stash-sync.py
+  - python
+  - "{pluginDir}/stash-sync.py"
 
 interface: raw
 errLog: warning
