@@ -650,41 +650,6 @@ def transfer_scene(scene_id, source, remote, resolver, dest_path, tag_name, remo
 
     log.info(f"=== Transfer complete: {title} ({filename}) ===")
 
-    except Exception:
-        log.error(f"Metadata failed after file move. File is at: {dest_file}")
-        raise
-
-    # 9. Strip the transfer tag so the scene won't be re-processed if
-    #    the destroy below fails
-    remaining_tags = [
-        t["id"] for t in (scene.get("tags") or [])
-        if t["name"].lower() != tag_name.lower()
-    ]
-    try:
-        gql(source, SCENE_UPDATE, {"input": {
-            "id": str(scene_id),
-            "tag_ids": remaining_tags,
-        }})
-    except Exception as exc:
-        log.warning(f"Could not strip transfer tag from source scene {scene_id}: {exc}")
-
-    # 10. Cleanup source — file is already moved so just remove the DB entry
-    log.info(f"Deleting source scene {scene_id}...")
-    try:
-        gql(source, SCENE_DESTROY, {"input": {
-            "id": str(scene_id),
-            "delete_file": False,
-            "delete_generated": True,
-        }})
-        log.info(f"Source scene {scene_id} deleted")
-    except Exception as exc:
-        log.error(
-            f"Failed to delete source scene {scene_id}: {exc}. "
-            "You may need to remove it manually."
-        )
-
-    log.info(f"Done: {title} ({filename})")
-
 
 # ---------------------------------------------------------------------------
 # Dry run

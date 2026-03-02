@@ -2,7 +2,15 @@
 set -e
 
 PLUGIN_ID="stash-sync"
-VERSION="1.3.4"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+VERSION=$(awk '/^version:/ { print $2; exit }' stash-sync.yml)
+if [[ -z "$VERSION" ]]; then
+    echo "Error: could not read version from stash-sync.yml" >&2
+    exit 1
+fi
+
 PLUGIN_FILES=(stash-sync.yml stash-sync.py stash_sync_ui.js requirements.txt)
 
 # ── Create zip with plugin files inside a stash-sync/ directory ──
