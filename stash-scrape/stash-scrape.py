@@ -65,10 +65,12 @@ query FindScene($id: ID!) {
 }
 """
 
-# remote_site_id is the stash-box ID returned alongside scraped metadata
-SCRAPE_SINGLE_SCENE = """
-mutation ScrapeSingleScene($source: ScraperSourceInput!, $input: ScrapeSingleSceneInput!) {
-    scrapeSingleScene(source: $source, input: $input) {
+# queryStashBoxScene replaced scrapeSingleScene in Stash v0.26+.
+# It matches the scene against stash-box using its fingerprints and returns
+# the best candidates. remote_site_id carries the stash-box scene ID.
+QUERY_STASHBOX_SCENE = """
+query QueryStashBoxScene($input: StashBoxSceneQueryInput!) {
+    queryStashBoxScene(input: $input) {
         title
         details
         date
@@ -90,6 +92,7 @@ mutation ScrapeSceneURL($url: String!) {
         date
         urls
         director
+        remote_site_id
         studio     { name stored_id }
         performers { name stored_id gender }
         tags       { name stored_id }
@@ -342,34 +345,24 @@ def save_full(stash, scene, scrape_data, overwrite):
 # ---------------------------------------------------------------------------
 
 
-def _scrape_with_source(stash, scene_id, source):
-    res = gql(stash, SCRAPE_SINGLE_SCENE, {"source": source, "input": {"scene_id": scene_id}})
-    return res.get("scrapeSingleScene")
-
-
-def scrape_scene(stash, scene, stashbox_endpoint, scraper_id):
-    """Try all applicable scraping strategies and return the first result."""
+def scrape_scene(stash, scene, stashbox_endpoint):
+    """Return scraped metadata for a scene, trying each strategy in order."""
     scene_id = scene["id"]
 
-    # 1. Stash-box (works with or without an existing stash_id — the scraper decides)
+    # 1. Stash-box fingerprint query (v0.26+ replacement for scrapeSingleScene).
+    #    Stash matches the scene against stash-box using its file fingerprints.
     if stashbox_endpoint:
         try:
-            data = _scrape_with_source(stash, scene_id, {"stash_box_endpoint": stashbox_endpoint})
-            if data:
-                return data
+            res = gql(stash, QUERY_STASHBOX_SCENE, {
+                "input": {"stash_box_endpoint": stashbox_endpoint, "scene_id": scene_id}
+            })
+            results = res.get("queryStashBoxScene") or []
+            if results:
+                return results[0]  # best fingerprint match
         except Exception as exc:
-            log.warning(f"Stash-box scrape failed for scene {scene_id}: {exc}")
+            log.warning(f"Stash-box query failed for scene {scene_id}: {exc}")
 
-    # 2. Specific scraper by ID
-    if scraper_id:
-        try:
-            data = _scrape_with_source(stash, scene_id, {"scraper_id": scraper_id})
-            if data:
-                return data
-        except Exception as exc:
-            log.warning(f"Scraper '{scraper_id}' failed for scene {scene_id}: {exc}")
-
-    # 3. URL auto-detection
+    # 2. URL scraping — auto-detects the right scraper from the URL
     for url in scene.get("urls") or []:
         if not url:
             continue
@@ -379,7 +372,7 @@ def scrape_scene(stash, scene, stashbox_endpoint, scraper_id):
             if data:
                 return data
         except Exception as exc:
-            log.debug(f"URL scrape failed for {url}: {exc}")
+            log.debug(f"URL scrape skipped for {url}: {exc}")
 
     return None
 
@@ -433,7 +426,6 @@ def resolve_stashbox_endpoint(stash, configured):
 
 def run(stash, settings, mode, single_scene_id=None, scene_ids=None):
     stashbox_endpoint = resolve_stashbox_endpoint(stash, settings.get("stashbox_endpoint", ""))
-    scraper_id = (settings.get("scraper_id") or "").strip() or None
     overwrite = settings.get("overwrite_data", False)
 
     match_only = mode in ("match_all", "match_scene", "match_selected")
@@ -458,7 +450,7 @@ def run(stash, settings, mode, single_scene_id=None, scene_ids=None):
     for i, scene in enumerate(scenes):
         log.progress(i / total if total else 1)
         try:
-            scrape_data = scrape_scene(stash, scene, stashbox_endpoint, scraper_id)
+            scrape_data = scrape_scene(stash, scene, stashbox_endpoint)
             if scrape_data:
                 if match_only:
                     saved = save_match_only(stash, scene, scrape_data, stashbox_endpoint)

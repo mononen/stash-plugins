@@ -1,6 +1,6 @@
 name: Stash Scrape
 description: Scrape scene metadata in the background as a task
-version: 0.2.1
+version: 0.2.2
 
 ui:
   javascript:
@@ -10,10 +10,6 @@ settings:
   stashbox_endpoint:
     displayName: Stash-Box Endpoint
     description: Stash-Box endpoint URL to use (leave empty to auto-use the first one configured in Stash settings)
-    type: STRING
-  scraper_id:
-    displayName: Scraper ID
-    description: Scraper ID to use for scene scraping (leave empty to fall back to URL auto-detection)
     type: STRING
   overwrite_data:
     displayName: Overwrite Existing Data
