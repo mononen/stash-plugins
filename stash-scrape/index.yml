@@ -1,0 +1,8 @@
+- id: stash-scrape
+  name: Stash Scrape
+  version: 0.2.0
+  date: "2026-03-02 19:48:38"
+  path: stash-scrape.zip
+  sha256: ef3353123c235e95ffee6c3daa47317a068236c7360f5286c34109561b4840fa
+  metadata:
+    description: Scrape scene metadata in the background as a task

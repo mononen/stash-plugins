@@ -1,36 +1,24 @@
 name: Stash Scrape
-description: Scrape scene metadata in the background as a task, with configurable attribute creation
-version: 0.1.0
+description: Scrape scene metadata in the background as a task
+version: 0.2.0
 
 ui:
   javascript:
     - stash_scrape_ui.js
 
 settings:
-  create_studio:
-    displayName: Create Studios
-    description: Create a new studio if a scraped studio name is not found in your library
-    type: BOOLEAN
-  create_performers:
-    displayName: Create Performers
-    description: Create new performers if scraped performer names are not found in your library
-    type: BOOLEAN
-  create_tags:
-    displayName: Create Tags
-    description: Create new tags if scraped tag names are not found in your library
-    type: BOOLEAN
-  overwrite_data:
-    displayName: Overwrite Existing Data
-    description: Overwrite scene fields (title, date, details, etc.) that already have values
-    type: BOOLEAN
   stashbox_endpoint:
     displayName: Stash-Box Endpoint
-    description: Stash-Box endpoint URL to use (leave empty to use the first one configured in Stash settings)
+    description: Stash-Box endpoint URL to use (leave empty to auto-use the first one configured in Stash settings)
     type: STRING
   scraper_id:
     displayName: Scraper ID
     description: Scraper ID to use for scene scraping (leave empty to fall back to URL auto-detection)
     type: STRING
+  overwrite_data:
+    displayName: Overwrite Existing Data
+    description: Overwrite scene fields (title, date, details, etc.) that already have values when saving
+    type: BOOLEAN
 
 exec:
   - python
@@ -40,15 +28,27 @@ interface: raw
 errLog: warning
 
 tasks:
-  - name: Scrape All Scenes
-    description: Scrape metadata for every scene in the library
+  - name: Match Scenes
+    description: Scrape every scene and save only the Stash-Box ID — no metadata changes
+    defaultArgs:
+      mode: match_all
+  - name: Scrape & Save All
+    description: Scrape every scene and save all metadata, creating any missing studios, performers, and tags
     defaultArgs:
       mode: scrape_all
-  - name: Scrape Scenes Without Metadata
-    description: Scrape only scenes that are missing a title or studio
+  - name: Match Single Scene
+    description: Match a single scene to Stash-Box and save its ID (used by the UI)
     defaultArgs:
-      mode: scrape_missing
-  - name: Scrape Single Scene
-    description: Scrape a single scene by ID (used internally by the UI button)
+      mode: match_scene
+  - name: Scrape & Save Single Scene
+    description: Scrape a single scene and save all metadata (used by the UI)
     defaultArgs:
       mode: scrape_scene
+  - name: Match Selected
+    description: Match a selection of scenes to Stash-Box and save their IDs (used by the UI)
+    defaultArgs:
+      mode: match_selected
+  - name: Scrape & Save Selected
+    description: Scrape a selection of scenes and save all metadata (used by the UI)
+    defaultArgs:
+      mode: scrape_selected
