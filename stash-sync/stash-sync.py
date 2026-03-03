@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sys
 import shutil
 import time
@@ -493,7 +494,11 @@ def transfer_scene(scene_id, source, remote, resolver, dest_path, tag_name, remo
     # 4. Move the file (filesystem — file in "purgatory" until remote scan + metadata done)
     dest_file = os.path.join(dest_path, filename)
     if os.path.exists(dest_file):
-        raise FileExistsError(f"Destination already exists: {dest_file}")
+        stem, ext = os.path.splitext(filename)
+        unique_suffix = secrets.token_hex(3)
+        filename = f"{stem}_{unique_suffix}{ext}"
+        dest_file = os.path.join(dest_path, filename)
+        log.info(f"[Filesystem] Step 4/9: Destination filename collision — renamed to: {filename}")
     if not os.path.exists(source_path):
         log.warning(f"Source file not found: {source_path!r}; tagging scene {scene_id} with 'missing'")
         missing_tag_id = ensure_tag(source, "missing")
